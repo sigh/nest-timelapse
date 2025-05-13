@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/pion/interceptor"
@@ -128,6 +129,9 @@ func writeH264ToBuffer(remoteTrack *TrackRemote) (*bytes.Buffer, error) {
 
 	for {
 		rtpPacket, _, err := remoteTrack.ReadRTP()
+		if err == io.EOF {
+			return buffer, nil
+		}
 		if err != nil {
 			return buffer, fmt.Errorf("track ended: %w", err)
 		}
