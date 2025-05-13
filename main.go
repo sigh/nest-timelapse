@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/sigh/nest-timelapse/internal/auth"
-	"github.com/sigh/nest-timelapse/internal/camera"
+	"github.com/sigh/nest-timelapse/internal/sdm"
 	"github.com/sigh/nest-timelapse/internal/video"
 	"github.com/sigh/nest-timelapse/internal/webrtc"
 )
@@ -40,17 +40,17 @@ var (
 // getCameraImage is the main function that orchestrates the entire process:
 // authentication, camera discovery, WebRTC setup, streaming, and recording
 func getCameraImage() error {
-	oauthToken, err := auth.GetCredentials(tokenFile, credentialsFile)
+	tokenSource, err := auth.GetCredentials(tokenFile, credentialsFile)
 	if err != nil {
 		return fmt.Errorf("failed to get credentials: %w", err)
 	}
 
-	service, err := auth.CreateSDMService(oauthToken)
+	sdmService, err := sdm.NewService(tokenSource)
 	if err != nil {
 		return err
 	}
 
-	cameraDevice, err := camera.FindCamera(service, enterpriseID)
+	cameraDevice, err := sdmService.FindCamera(enterpriseID)
 	if err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func getCameraImage() error {
 		}
 	})
 
-	answerSdp, err := camera.GenerateWebRTCStream(service, cameraDevice, offer.SDP)
+	answerSdp, err := sdmService.GenerateWebRTCStream(cameraDevice, offer.SDP)
 	if err != nil {
 		return err
 	}

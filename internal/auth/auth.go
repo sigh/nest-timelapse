@@ -10,8 +10,6 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	"google.golang.org/api/option"
-	"google.golang.org/api/smartdevicemanagement/v1"
 )
 
 const (
@@ -28,6 +26,30 @@ type credentials struct {
 		ClientSecret            string   `json:"client_secret"`
 		RedirectURIs            []string `json:"redirect_uris"`
 	} `json:"installed"`
+}
+
+// TokenSource wraps an oauth2.TokenSource and handles token persistence
+type TokenSource struct {
+	tokenSource oauth2.TokenSource
+	tokenFile   string
+	config      *oauth2.Config
+}
+
+// Token implements oauth2.TokenSource interface
+func (ts *TokenSource) Token() (*oauth2.Token, error) {
+	token, err := ts.tokenSource.Token()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token: %w", err)
+	}
+
+	// Save the token if it has been refreshed
+	if token.AccessToken != "" {
+		if err := saveJSON(token, ts.tokenFile); err != nil {
+			fmt.Printf("Warning: failed to save refreshed token: %v\n", err)
+		}
+	}
+
+	return token, nil
 }
 
 // loadJSON is a generic function that loads and parses a JSON file into the specified type
@@ -52,14 +74,10 @@ func saveJSON[T any](data *T, filename string) error {
 	return os.WriteFile(filename, jsonData, 0600)
 }
 
-// GetCredentials handles OAuth token management, including loading from cache
-// and initiating the OAuth flow if needed. tokenFile and credentialsFile specify
-// the paths to the token and credentials JSON files respectively.
-func GetCredentials(tokenFile, credentialsFile string) (*oauth2.Token, error) {
-	if token, err := loadJSON[oauth2.Token](tokenFile); err == nil {
-		return token, nil
-	}
-
+// GetCredentials handles OAuth token management, including loading from cache,
+// token refresh, and initiating the OAuth flow if needed. Returns a TokenSource
+// that will automatically handle token refresh and persistence.
+func GetCredentials(tokenFile, credentialsFile string) (*TokenSource, error) {
 	creds, err := loadJSON[credentials](credentialsFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load credentials: %w", err)
@@ -73,16 +91,29 @@ func GetCredentials(tokenFile, credentialsFile string) (*oauth2.Token, error) {
 		RedirectURL:  "http://localhost:8080",
 	}
 
-	token, err := handleOAuthFlow(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to complete OAuth flow: %w", err)
+	// Try to load existing token
+	var token *oauth2.Token
+	if savedToken, err := loadJSON[oauth2.Token](tokenFile); err == nil {
+		token = savedToken
+	} else {
+		// No saved token, start OAuth flow
+		token, err = handleOAuthFlow(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to complete OAuth flow: %w", err)
+		}
+		if err := saveJSON(token, tokenFile); err != nil {
+			return nil, fmt.Errorf("failed to save token: %w", err)
+		}
 	}
 
-	if err := saveJSON(token, tokenFile); err != nil {
-		return nil, fmt.Errorf("failed to save token: %w", err)
-	}
+	// Create a token source that will handle refresh
+	tokenSource := config.TokenSource(context.Background(), token)
 
-	return token, nil
+	return &TokenSource{
+		tokenSource: tokenSource,
+		tokenFile:   tokenFile,
+		config:      config,
+	}, nil
 }
 
 // handleOAuthFlow implements the OAuth 2.0 authorization code flow, prompting
@@ -118,21 +149,4 @@ func handleOAuthFlow(config *oauth2.Config) (*oauth2.Token, error) {
 	}
 
 	return token, nil
-}
-
-// CreateSDMService initializes the Smart Device Management API client
-// with the provided OAuth token
-func CreateSDMService(token *oauth2.Token) (*smartdevicemanagement.Service, error) {
-	config := &oauth2.Config{
-		Scopes:   []string{oauthScope},
-		Endpoint: google.Endpoint,
-	}
-	tokenSource := config.TokenSource(context.Background(), token)
-
-	service, err := smartdevicemanagement.NewService(context.Background(), option.WithTokenSource(tokenSource))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SDM service: %w", err)
-	}
-
-	return service, nil
 }

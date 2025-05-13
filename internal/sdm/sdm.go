@@ -1,20 +1,38 @@
-package camera
+package sdm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
+	"github.com/sigh/nest-timelapse/internal/auth"
+	"google.golang.org/api/option"
 	"google.golang.org/api/smartdevicemanagement/v1"
 )
 
+// Service wraps the SDM API service and provides high-level operations
+type Service struct {
+	service *smartdevicemanagement.Service
+}
+
+// NewService creates a new SDM service using the provided token source
+func NewService(tokenSource *auth.TokenSource) (*Service, error) {
+	service, err := smartdevicemanagement.NewService(context.Background(), option.WithTokenSource(tokenSource))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SDM service: %w", err)
+	}
+
+	return &Service{service: service}, nil
+}
+
 // FindCamera searches for a camera device in the enterprise and returns
 // the first one found
-func FindCamera(service *smartdevicemanagement.Service, enterpriseID string) (*smartdevicemanagement.GoogleHomeEnterpriseSdmV1Device, error) {
+func (s *Service) FindCamera(enterpriseID string) (*smartdevicemanagement.GoogleHomeEnterpriseSdmV1Device, error) {
 	if enterpriseID == "" {
 		return nil, fmt.Errorf("enterprise ID is required")
 	}
 
-	listDeviceResponse, err := service.Enterprises.Devices.List("enterprises/" + enterpriseID).Do()
+	listDeviceResponse, err := s.service.Enterprises.Devices.List("enterprises/" + enterpriseID).Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list devices: %w", err)
 	}
@@ -34,7 +52,7 @@ func FindCamera(service *smartdevicemanagement.Service, enterpriseID string) (*s
 
 // GenerateWebRTCStream sends the WebRTC offer to the camera and returns
 // the answer SDP for establishing the connection
-func GenerateWebRTCStream(service *smartdevicemanagement.Service, camera *smartdevicemanagement.GoogleHomeEnterpriseSdmV1Device, offerSDP string) (string, error) {
+func (s *Service) GenerateWebRTCStream(camera *smartdevicemanagement.GoogleHomeEnterpriseSdmV1Device, offerSDP string) (string, error) {
 	cmdParams := map[string]interface{}{
 		"offerSdp": offerSDP,
 	}
@@ -48,7 +66,7 @@ func GenerateWebRTCStream(service *smartdevicemanagement.Service, camera *smartd
 		Params:  cmdParamsJSON,
 	}
 
-	cmdResponse, err := service.Enterprises.Devices.ExecuteCommand(camera.Name, command).Do()
+	cmdResponse, err := s.service.Enterprises.Devices.ExecuteCommand(camera.Name, command).Do()
 	if err != nil {
 		return "", fmt.Errorf("failed to execute GenerateWebRtcStream command: %w", err)
 	}
