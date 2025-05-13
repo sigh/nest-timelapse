@@ -18,10 +18,18 @@ import (
 	"github.com/sigh/nest-timelapse/internal/webrtc"
 )
 
+// Auth files
+const (
+	tokenFile       = "token.json"
+	credentialsFile = "credentials.json"
+)
+
 // Timeouts and durations
 const (
 	// recordingDuration is how long to record video from the camera
 	recordingDuration = 5 * time.Second
+	// webRtcTimeout is the maximum time to wait for WebRTC operations
+	webRtcTimeout = 30 * time.Second
 )
 
 var (
@@ -32,7 +40,7 @@ var (
 // getCameraImage is the main function that orchestrates the entire process:
 // authentication, camera discovery, WebRTC setup, streaming, and recording
 func getCameraImage() error {
-	oauthToken, err := auth.GetCredentials()
+	oauthToken, err := auth.GetCredentials(tokenFile, credentialsFile)
 	if err != nil {
 		return fmt.Errorf("failed to get credentials: %w", err)
 	}
@@ -83,14 +91,14 @@ func getCameraImage() error {
 		return fmt.Errorf("failed to set remote description: %w", err)
 	}
 
-	if err := webrtc.WaitForConnection(peerConnection, webrtc.WebRtcTimeout); err != nil {
+	if err := webrtc.WaitForConnection(peerConnection, webRtcTimeout); err != nil {
 		return err
 	}
 
 	fmt.Printf("Recording for %s...\n", recordingDuration)
 	time.Sleep(recordingDuration)
 
-	if err := webrtc.WaitForConnectionClose(peerConnection, webrtc.WebRtcTimeout); err != nil {
+	if err := webrtc.WaitForConnectionClose(peerConnection, webRtcTimeout); err != nil {
 		return fmt.Errorf("failed to clean up connection: %w", err)
 	}
 

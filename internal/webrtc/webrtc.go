@@ -12,9 +12,6 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media/h264writer"
 )
 
-// WebRtcTimeout is the maximum time to wait for WebRTC operations
-const WebRtcTimeout = 30 * time.Second
-
 // SessionDescription is an alias for pionwebrtc.SessionDescription
 type SessionDescription = pionwebrtc.SessionDescription
 

@@ -15,9 +15,7 @@ import (
 )
 
 const (
-	oauthScope      = "https://www.googleapis.com/auth/sdm.service"
-	tokenFile       = "token.json"
-	credentialsFile = "credentials.json"
+	oauthScope = "https://www.googleapis.com/auth/sdm.service"
 )
 
 type credentials struct {
@@ -55,8 +53,9 @@ func saveJSON[T any](data *T, filename string) error {
 }
 
 // GetCredentials handles OAuth token management, including loading from cache
-// and initiating the OAuth flow if needed
-func GetCredentials() (*oauth2.Token, error) {
+// and initiating the OAuth flow if needed. tokenFile and credentialsFile specify
+// the paths to the token and credentials JSON files respectively.
+func GetCredentials(tokenFile, credentialsFile string) (*oauth2.Token, error) {
 	if token, err := loadJSON[oauth2.Token](tokenFile); err == nil {
 		return token, nil
 	}
