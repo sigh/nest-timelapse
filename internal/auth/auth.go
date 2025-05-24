@@ -39,6 +39,28 @@ type TokenSource struct {
 func (ts *TokenSource) Token() (*oauth2.Token, error) {
 	token, err := ts.tokenSource.Token()
 	if err != nil {
+		// Check if the error is due to an expired or invalid token
+		if strings.Contains(err.Error(), "invalid_grant") {
+			// Remove the expired token file
+			if err := os.Remove(ts.tokenFile); err != nil {
+				fmt.Printf("Warning: failed to remove expired token file: %v\n", err)
+			}
+
+			// Start a new OAuth flow
+			newToken, err := handleOAuthFlow(ts.config)
+			if err != nil {
+				return nil, fmt.Errorf("failed to refresh token through OAuth flow: %w", err)
+			}
+
+			// Save the new token
+			if err := saveJSON(newToken, ts.tokenFile); err != nil {
+				fmt.Printf("Warning: failed to save new token: %v\n", err)
+			}
+
+			// Update the token source with the new token
+			ts.tokenSource = ts.config.TokenSource(context.Background(), newToken)
+			return newToken, nil
+		}
 		return nil, fmt.Errorf("failed to get token: %w", err)
 	}
 
