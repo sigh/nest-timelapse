@@ -35,12 +35,16 @@ const (
 var (
 	outputDir    string
 	enterpriseID string
+	credsDir     string
 )
 
 // getCameraImage is the main function that orchestrates the entire process:
 // authentication, camera discovery, WebRTC setup, streaming, and recording
 func getCameraImage() error {
-	tokenSource, err := auth.GetCredentials(tokenFile, credentialsFile)
+	tokenPath := filepath.Join(credsDir, tokenFile)
+	credsPath := filepath.Join(credsDir, credentialsFile)
+
+	tokenSource, err := auth.GetCredentials(tokenPath, credsPath)
 	if err != nil {
 		return fmt.Errorf("failed to get credentials: %w", err)
 	}
@@ -121,6 +125,7 @@ func main() {
 	// Parse command line flags
 	flag.StringVar(&outputDir, "output-dir", ".", "Directory to save captured frames")
 	flag.StringVar(&enterpriseID, "enterprise-id", "", "Google Workspace enterprise ID where the camera is registered")
+	flag.StringVar(&credsDir, "creds-dir", ".", "Directory containing credentials.json and token.json files")
 	flag.Parse()
 
 	if enterpriseID == "" {
@@ -132,15 +137,28 @@ func main() {
 		log.Fatalf("Failed to create output directory: %v", err)
 	}
 
-	// Convert to absolute path for consistent handling
-	absPath, err := filepath.Abs(outputDir)
+	// Convert to absolute paths for consistent handling
+	absOutputPath, err := filepath.Abs(outputDir)
 	if err != nil {
 		log.Fatalf("Failed to get absolute path for output directory: %v", err)
 	}
-	outputDir = absPath
+	outputDir = absOutputPath
+
+	absCredsPath, err := filepath.Abs(credsDir)
+	if err != nil {
+		log.Fatalf("Failed to get absolute path for credentials directory: %v", err)
+	}
+	credsDir = absCredsPath
+
+	// Check if credentials file exists
+	credsPath := filepath.Join(credsDir, credentialsFile)
+	if _, err := os.Stat(credsPath); os.IsNotExist(err) {
+		log.Fatalf("Credentials file not found at %s", credsPath)
+	}
 
 	fmt.Printf("Using enterprise ID: %s\n", enterpriseID)
 	fmt.Printf("Saving frames to: %s\n", outputDir)
+	fmt.Printf("Using credentials from: %s\n", credsDir)
 
 	if err := getCameraImage(); err != nil {
 		log.Fatalf("Error: %v", err)
