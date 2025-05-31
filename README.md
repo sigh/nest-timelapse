@@ -26,10 +26,10 @@ go mod download
 
 ## Usage
 
-Run the application using the following command:
+Run the image capture command:
 
 ```bash
-go run main.go -enterprise-id "$ENTERPRISE_ID" -output-dir "$OUTPUT_DIR" -creds-dir "$CREDS_DIR"
+go run cmd/capture/main.go -enterprise-id "$ENTERPRISE_ID" -output-dir "$OUTPUT_DIR" -creds-dir "$CREDS_DIR"
 ```
 
 Where:
@@ -41,7 +41,21 @@ Where:
 Then run the following command to generate a timelapse video:
 
 ```bash
-go run cmd/timelapse/main.go -f 10 -o timelapse.mp4 -y "_output/*.jpg"
+go run cmd/timelapse/main.go -f 10 -o timelapse.mp4 -y "$OUTPUT_DIR/*.jpg"
+```
+
+## Installing
+
+You can also build and install both commands:
+
+```bash
+# Build both commands
+go build -o bin/capture ./cmd/capture
+go build -o bin/timelapse ./cmd/timelapse
+
+# Run the built binaries
+./bin/capture -enterprise-id "$ENTERPRISE_ID" -output-dir "$OUTPUT_DIR" -creds-dir "$CREDS_DIR"
+./bin/timelapse -f 10 -o timelapse.mp4 -y "$OUTPUT_DIR/*.jpg"
 ```
 
 ## Credential files
