@@ -3,3 +3,4 @@ token.json
 capture.sh
 _output/
 .DS_Store
+make_timelapse.sh
