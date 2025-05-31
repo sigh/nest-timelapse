@@ -2,3 +2,4 @@ credentials.json
 token.json
 capture.sh
 _output/
+.DS_Store

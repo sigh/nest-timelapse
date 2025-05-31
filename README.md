@@ -1,22 +1,17 @@
 # Nest Timelapse
 
-A Go application that captures images from a Nest camera.
+Go applications that captures images from a Nest camera and generates a
+timelapse video.
 
-## Prerequisites
-
-- Go 1.21 or later
-- A Google Nest Enterprise account
-- Enterprise ID from your Nest account
-- Sufficient disk space for video storage
-- Google Cloud credentials (credentials.json) for Nest API access
+(Experimenting with developing with AI.)
 
 ## Installation
 
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/Nest-Timelapse.git
-cd Nest-Timelapse
+git clone https://github.com/sigh/nest-timelapse.git
+cd nest-timelapse
 ```
 
 2. Install dependencies:
@@ -46,7 +41,7 @@ Where:
 Then run the following command to generate a timelapse video:
 
 ```bash
-./make_timelapse.sh _output/*.jpg timelapse.mp4
+go run cmd/timelapse/main.go -f 10 -o timelapse.mp4 -y "_output/*.jpg"
 ```
 
 ## Credential files
@@ -54,4 +49,4 @@ Then run the following command to generate a timelapse video:
 1. `credentials.json`: Google Cloud credentials file (create this in the Google Cloud Console)
 2. `token.json`: Generated automatically during the first run, stores the OAuth token
 
-These files should be kept secure and not committed to version control. The application will automatically handle token refresh when needed.
+The application will automatically handle token refresh when needed.
