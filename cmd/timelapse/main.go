@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/sigh/nest-timelapse/internal/parsetime"
 )
 
 type CropRange struct {
@@ -22,6 +25,7 @@ type Config struct {
 	InputPattern string
 	CropX        *CropRange
 	CropY        *CropRange
+	TimeRange    *parsetime.TimeRange
 }
 
 func parseCropRange(value string, paramName string) (*CropRange, error) {
@@ -51,6 +55,37 @@ func parseCropRange(value string, paramName string) (*CropRange, error) {
 	return &CropRange{start, end}, nil
 }
 
+func parseTimeRange(startTimeStr, endTimeStr, durationStr string) (*parsetime.TimeRange, error) {
+	var startTime, endTime *time.Time
+	var duration *time.Duration
+
+	if startTimeStr != "" {
+		t, err := parsetime.ParseTime(startTimeStr)
+		if err != nil {
+			return nil, err
+		}
+		startTime = t
+	}
+
+	if endTimeStr != "" {
+		t, err := parsetime.ParseTime(endTimeStr)
+		if err != nil {
+			return nil, err
+		}
+		endTime = t
+	}
+
+	if durationStr != "" {
+		d, err := parsetime.ParseDuration(durationStr)
+		if err != nil {
+			return nil, err
+		}
+		duration = d
+	}
+
+	return parsetime.MakeTimeRange(startTime, endTime, duration)
+}
+
 func parseArgs() (*Config, error) {
 	config := &Config{
 		Framerate:    5,
@@ -59,6 +94,8 @@ func parseArgs() (*Config, error) {
 	}
 
 	var cropXStr, cropYStr string
+	var startTimeStr, endTimeStr, durationStr string
+
 	flag.IntVar(&config.Framerate, "framerate", config.Framerate, "Set the output framerate")
 	flag.IntVar(&config.Framerate, "f", config.Framerate, "Set the output framerate (shorthand)")
 	flag.StringVar(&config.OutputFile, "output", config.OutputFile, "Set the output file")
@@ -67,6 +104,9 @@ func parseArgs() (*Config, error) {
 	flag.BoolVar(&config.Overwrite, "overwrite", false, "Overwrite output file if it exists (long form)")
 	flag.StringVar(&cropXStr, "crop-x", "", "Crop horizontally using width ratios (e.g. '0.4-0.6')")
 	flag.StringVar(&cropYStr, "crop-y", "", "Crop vertically using height ratios (e.g. '0.4-0.6')")
+	flag.StringVar(&startTimeStr, "start-time", "", "Start time (HH:MM:SS or YYYY-MM-DD HH:MM:SS)")
+	flag.StringVar(&endTimeStr, "end-time", "", "End time (HH:MM:SS or YYYY-MM-DD HH:MM:SS)")
+	flag.StringVar(&durationStr, "duration", "", "Duration (e.g. '1d6h30m', '2d', '6h30m')")
 
 	// Add minimal usage message for the positional argument
 	flag.Usage = func() {
@@ -98,6 +138,13 @@ func parseArgs() (*Config, error) {
 		}
 		config.CropY = cropY
 	}
+
+	// Parse time range
+	timeRange, err := parseTimeRange(startTimeStr, endTimeStr, durationStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid time range: %w", err)
+	}
+	config.TimeRange = timeRange
 
 	return config, nil
 }
