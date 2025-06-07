@@ -10,11 +10,13 @@ import (
 	"github.com/sigh/nest-timelapse/internal/parsetime"
 )
 
+const maxFPS = 60
+
 // FrameInfo represents information about a single frame in the timelapse
 type FrameInfo struct {
-	Path     string
-	Duration float64
-	Time     time.Time // Time when the frame was captured
+	Path     string        // Location of the image
+	Duration time.Duration // Duration of the frame
+	Time     time.Time     // Time when the frame was captured
 }
 
 // String returns the frame information formatted for ffmpeg concat demuxer
@@ -29,7 +31,7 @@ func (f FrameInfo) String() string {
 	// Escape single quotes in the filename
 	escapedFile := strings.ReplaceAll(absPath, "'", "'\\''")
 	if f.Duration > 0 {
-		return fmt.Sprintf("file 'file://%s'\nduration %f", escapedFile, f.Duration)
+		return fmt.Sprintf("file 'file://%s'\nduration %f", escapedFile, f.Duration.Seconds())
 	}
 	return fmt.Sprintf("file 'file://%s'", escapedFile)
 }
@@ -56,9 +58,9 @@ func parseFrameTime(filename string) (time.Time, error) {
 	return t, nil
 }
 
-// GenerateFrames takes an input pattern, framerate, and time range, and sends frame information through a channel.
-// It returns an error channel that will receive any errors encountered during processing.
-func GenerateFrames(pattern string, framerate int, timeRange *parsetime.TimeRange) (<-chan FrameInfo, <-chan error) {
+// GenerateFrames generates frame information for the timelapse, filtering by time range if provided.
+// Returns a channel of frames and an error channel.
+func GenerateFrames(pattern string, speedup float64, timeRange *parsetime.TimeRange) (<-chan FrameInfo, <-chan error) {
 	frameChan := make(chan FrameInfo)
 	errChan := make(chan error, 1)
 
@@ -66,7 +68,6 @@ func GenerateFrames(pattern string, framerate int, timeRange *parsetime.TimeRang
 		defer close(frameChan)
 		defer close(errChan)
 
-		// Get the list of files matching the pattern
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
 			errChan <- fmt.Errorf("invalid pattern: %v", err)
@@ -78,56 +79,58 @@ func GenerateFrames(pattern string, framerate int, timeRange *parsetime.TimeRang
 		}
 
 		// Parse timestamps and filter by time range
-		var frames []FrameInfo
+		var validFrames []FrameInfo
 		for _, match := range matches {
 			t, err := parseFrameTime(match)
 			if err != nil {
-				errChan <- fmt.Errorf("error parsing frame time: %v", err)
+				errChan <- fmt.Errorf("invalid timestamp in filename %s: %v", match, err)
 				return
 			}
-
-			// Skip if outside time range
 			if timeRange != nil {
-				// Check if we have a start time and the frame is before it
-				if !timeRange.Start.IsZero() && t.Before(timeRange.Start) {
-					continue
-				}
-				// Check if we have an end time and the frame is after it
-				if !timeRange.End.IsZero() && t.After(timeRange.End) {
+				if t.Before(timeRange.Start) || t.After(timeRange.End) {
 					continue
 				}
 			}
-
-			frames = append(frames, FrameInfo{
+			validFrames = append(validFrames, FrameInfo{
 				Path: match,
 				Time: t,
 			})
 		}
 
-		if len(frames) == 0 {
+		if len(validFrames) == 0 {
 			errChan <- fmt.Errorf("no frames found within specified time range")
 			return
 		}
 
 		// Sort frames by timestamp
-		sort.Slice(frames, func(i, j int) bool {
-			return frames[i].Time.Before(frames[j].Time)
+		sort.Slice(validFrames, func(i, j int) bool {
+			return validFrames[i].Time.Before(validFrames[j].Time)
 		})
 
-		// Calculate frame duration based on framerate
-		frameDuration := 1.0 / float64(framerate)
+		const minFrameDuration = time.Second / time.Duration(maxFPS) // Minimum frame duration for maxFPS
+		currentFrame := &validFrames[0]
 
-		// Send all frames except the last one
-		for i := 0; i < len(frames)-1; i++ {
-			frames[i].Duration = frameDuration
-			frameChan <- frames[i]
+		// Process frames
+		for i := 1; i < len(validFrames); i++ {
+			nextTime := validFrames[i].Time
+			duration := nextTime.Sub(currentFrame.Time) / time.Duration(speedup)
+
+			// Skip this frame if it would play faster than maxFPS
+			if duration < minFrameDuration {
+				continue
+			}
+
+			// Now we know the duration, output the current frame
+			currentFrame.Duration = duration
+			frameChan <- *currentFrame
+
+			// Update currentFrame to the next frame
+			currentFrame = &validFrames[i]
 		}
 
-		// Send the last frame without duration
-		if len(frames) > 0 {
-			frames[len(frames)-1].Duration = 0 // Last frame doesn't need duration
-			frameChan <- frames[len(frames)-1]
-		}
+		// Output the last frame with duration 0
+		currentFrame.Duration = 0
+		frameChan <- *currentFrame
 	}()
 
 	return frameChan, errChan

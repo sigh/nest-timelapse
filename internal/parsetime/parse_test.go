@@ -196,6 +196,11 @@ func TestParseDuration(t *testing.T) {
 			want:  30 * time.Minute,
 		},
 		{
+			name:  "seconds only",
+			input: "45s",
+			want:  45 * time.Second,
+		},
+		{
 			name:  "combined",
 			input: "1d6h30m",
 			want:  (24*time.Hour + 6*time.Hour + 30*time.Minute),
@@ -206,8 +211,8 @@ func TestParseDuration(t *testing.T) {
 			want:  (24*time.Hour + 6*time.Hour + 30*time.Minute),
 		},
 		{
-			name:  "decimal not allowed",
-			input: "1.5h",
+			name:    "decimal not allowed",
+			input:   "1.5h",
 			wantErr: true,
 		},
 	}
@@ -357,6 +362,74 @@ func TestMakeTimeRange(t *testing.T) {
 			// For all tests, check both start and end times with epsilon
 			timeEqual(t, got.Start, tt.want.Start, "MakeTimeRange() start")
 			timeEqual(t, got.End, tt.want.End, "MakeTimeRange() end")
+		})
+	}
+}
+
+func TestParseSpeedup(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    float64
+		wantErr bool
+	}{
+		{
+			name:    "empty string",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "invalid format",
+			input:   "invalid",
+			wantErr: true,
+		},
+		{
+			name:    "missing target",
+			input:   "1h",
+			wantErr: true,
+		},
+		{
+			name:    "invalid real time",
+			input:   "invalid/1m",
+			wantErr: true,
+		},
+		{
+			name:    "invalid target time",
+			input:   "1h/invalid",
+			wantErr: true,
+		},
+		{
+			name:  "hour to minute",
+			input: "1h/1m",
+			want:  60,
+		},
+		{
+			name:  "day to second",
+			input: "1d/1s",
+			want:  86400,
+		},
+		{
+			name:  "hour to second",
+			input: "1h/1s",
+			want:  3600,
+		},
+		{
+			name:    "zero target",
+			input:   "1h/0s",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseSpeedup(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseSpeedup() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ParseSpeedup() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }

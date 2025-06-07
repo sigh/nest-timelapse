@@ -21,13 +21,13 @@ type CropRange struct {
 }
 
 type Config struct {
-	Framerate    int
-	OutputFile   string
-	Overwrite    bool
+	Speedup     float64
+	OutputFile  string
+	Overwrite   bool
 	InputPattern string
-	CropX        *CropRange
-	CropY        *CropRange
-	TimeRange    *parsetime.TimeRange
+	CropX       *CropRange
+	CropY       *CropRange
+	TimeRange   *parsetime.TimeRange
 }
 
 // FrameInfo represents information about a single frame in the timelapse
@@ -106,16 +106,17 @@ func parseTimeRange(startTimeStr, endTimeStr, durationStr string) (*parsetime.Ti
 
 func parseArgs() (*Config, error) {
 	config := &Config{
-		Framerate:    5,
-		OutputFile:   "timelapse.mp4",
+		Speedup:     3600, // Default to 3600x speedup (1 hour = 1 second)
+		OutputFile:  "timelapse.mp4",
 		InputPattern: "nest_camera_frame_*.jpg",
 	}
 
 	var cropXStr, cropYStr string
 	var startTimeStr, endTimeStr, durationStr string
+	var speedupStr string
 
-	flag.IntVar(&config.Framerate, "framerate", config.Framerate, "Set the output framerate")
-	flag.IntVar(&config.Framerate, "f", config.Framerate, "Set the output framerate (shorthand)")
+	flag.StringVar(&speedupStr, "speedup", "1h/1s", "Speedup ratio (e.g. '1h/1m' for 1 hour = 1 minute, '1d/30s' for 1 day = 30 seconds)")
+	flag.StringVar(&speedupStr, "s", "1h/1s", "Speedup ratio (shorthand)")
 	flag.StringVar(&config.OutputFile, "output", config.OutputFile, "Set the output file")
 	flag.StringVar(&config.OutputFile, "o", config.OutputFile, "Set the output file (shorthand)")
 	flag.BoolVar(&config.Overwrite, "y", false, "Overwrite output file if it exists")
@@ -139,6 +140,13 @@ func parseArgs() (*Config, error) {
 	if flag.NArg() > 0 {
 		config.InputPattern = flag.Arg(0)
 	}
+
+	// Parse speedup ratio
+	speedup, err := parsetime.ParseSpeedup(speedupStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid speedup ratio: %v", err)
+	}
+	config.Speedup = speedup
 
 	// Parse crop parameters
 	if cropXStr != "" {
@@ -258,7 +266,7 @@ func generateTimelapse(config *Config) error {
 	}
 
 	// Get frames through the channel
-	frameChan, errChan := frames.GenerateFrames(config.InputPattern, config.Framerate, config.TimeRange)
+	frameChan, errChan := frames.GenerateFrames(config.InputPattern, config.Speedup, config.TimeRange)
 
 	// Write frames to the pipe in a goroutine
 	go func() {

@@ -61,7 +61,7 @@ func ParseTime(value string) (*time.Time, error) {
 	return nil, fmt.Errorf("invalid time value: must be in format 'HH:MM', 'YYYY-MM-DD', or 'YYYY-MM-DD HH:MM' (separator can be any non-alphanumeric character except colon and hyphen)")
 }
 
-// ParseDuration parses a duration string supporting weeks, days, hours, and minutes (e.g. "2w3d6h30m")
+// ParseDuration parses a duration string supporting weeks, days, hours, minutes, and seconds (e.g. "2w3d6h30m15s")
 func ParseDuration(value string) (*time.Duration, error) {
 	if value == "" {
 		return nil, nil
@@ -74,7 +74,7 @@ func ParseDuration(value string) (*time.Duration, error) {
 
 	for _, r := range value {
 		isDigit := r >= '0' && r <= '9'
-		isUnit := r == 'w' || r == 'd' || r == 'h' || r == 'm'
+		isUnit := r == 'w' || r == 'd' || r == 'h' || r == 'm' || r == 's'
 
 		if !inNumber && isDigit {
 			// Start of a new number
@@ -91,7 +91,7 @@ func ParseDuration(value string) (*time.Duration, error) {
 			inNumber = false
 		} else if !isDigit && !isUnit {
 			// Invalid character
-			return nil, fmt.Errorf("invalid character in duration: %c (must be digits or units w,d,h,m)", r)
+			return nil, fmt.Errorf("invalid character in duration: %c (must be digits or units w,d,h,m,s)", r)
 		}
 	}
 
@@ -120,8 +120,10 @@ func ParseDuration(value string) (*time.Duration, error) {
 			total += time.Duration(n) * time.Hour
 		case "m":
 			total += time.Duration(n) * time.Minute
+		case "s":
+			total += time.Duration(n) * time.Second
 		default:
-			return nil, fmt.Errorf("invalid unit in duration: %s (must be w, d, h, or m)", unit)
+			return nil, fmt.Errorf("invalid unit in duration: %s (must be w, d, h, m, or s)", unit)
 		}
 	}
 
@@ -186,4 +188,43 @@ func MakeTimeRange(start, end *time.Time, duration *time.Duration) (*TimeRange, 
 		Start: *startTime,
 		End:   *endTime,
 	}, nil
+}
+
+// ParseSpeedup parses a speedup ratio string in the format "duration/target".
+// For example: "1h/1m" means 1 hour of real time will be compressed to 1 minute,
+// "1d/30s" means 1 day will be compressed to 30 seconds.
+// Returns the speedup factor (e.g., 60 for "1h/1m").
+func ParseSpeedup(s string) (float64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty speedup string")
+	}
+
+	parts := strings.Split(s, "/")
+	if len(parts) != 2 {
+		return 0, fmt.Errorf("speedup must be in format 'duration/target' (e.g. '1h/1m')")
+	}
+
+	// Parse the real time duration
+	realDuration, err := ParseDuration(parts[0])
+	if err != nil {
+		return 0, fmt.Errorf("invalid real time duration: %v", err)
+	}
+
+	// Parse the target duration
+	targetDuration, err := ParseDuration(parts[1])
+	if err != nil {
+		return 0, fmt.Errorf("invalid target duration: %v", err)
+	}
+
+	if targetDuration == nil || *targetDuration == 0 {
+		return 0, fmt.Errorf("target duration cannot be zero")
+	}
+
+	// Calculate speedup factor
+	speedup := realDuration.Seconds() / targetDuration.Seconds()
+	if speedup <= 0 {
+		return 0, fmt.Errorf("invalid speedup ratio: result must be positive")
+	}
+
+	return speedup, nil
 }
