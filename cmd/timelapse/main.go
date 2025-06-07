@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sigh/nest-timelapse/internal/frames"
 	"github.com/sigh/nest-timelapse/internal/parsetime"
 )
 
@@ -26,6 +28,22 @@ type Config struct {
 	CropX        *CropRange
 	CropY        *CropRange
 	TimeRange    *parsetime.TimeRange
+}
+
+// FrameInfo represents information about a single frame in the timelapse
+type FrameInfo struct {
+	Path     string
+	Duration float64
+}
+
+// String returns the frame information formatted for ffmpeg concat demuxer
+func (f FrameInfo) String() string {
+	// Escape single quotes in the filename
+	escapedFile := strings.ReplaceAll(f.Path, "'", "'\\''")
+	if f.Duration > 0 {
+		return fmt.Sprintf("file '%s'\nduration %f", escapedFile, f.Duration)
+	}
+	return fmt.Sprintf("file '%s'", escapedFile)
 }
 
 func parseCropRange(value string, paramName string) (*CropRange, error) {
@@ -176,6 +194,7 @@ func checkOutputFile(outputFile string, overwrite bool) error {
 }
 
 func generateTimelapse(config *Config) error {
+	// Start constructing ffmpeg command
 	args := []string{}
 	if config.Overwrite {
 		args = append(args, "-y")
@@ -183,9 +202,10 @@ func generateTimelapse(config *Config) error {
 
 	// Add input options
 	args = append(args,
-		"-framerate", fmt.Sprintf("%d", config.Framerate),
-		"-pattern_type", "glob",
-		"-i", config.InputPattern,
+		"-f", "concat",
+		"-protocol_whitelist", "file,pipe",
+		"-safe", "0",
+		"-i", "pipe:0", // Read from stdin
 	)
 
 	// Add encoding options
@@ -224,18 +244,44 @@ func generateTimelapse(config *Config) error {
 		config.OutputFile,
 	)
 
+	// Create a pipe for passing frame information to ffmpeg
+	reader, writer := io.Pipe()
+	defer reader.Close()
+
+	// Start ffmpeg
 	cmd := exec.Command("ffmpeg", args...)
+	cmd.Stdin = reader
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start ffmpeg: %v", err)
+	}
 
-	fmt.Printf("Generating timelapse from %s -> %s\n", config.InputPattern, config.OutputFile)
-	if config.CropX != nil {
-		fmt.Printf("Cropping horizontally from %.2f to %.2f of width\n", config.CropX.Start, config.CropX.End)
-	}
-	if config.CropY != nil {
-		fmt.Printf("Cropping vertically from %.2f to %.2f of height\n", config.CropY.Start, config.CropY.End)
-	}
-	if err := cmd.Run(); err != nil {
+	// Get frames through the channel
+	frameChan, errChan := frames.GenerateFrames(config.InputPattern, config.Framerate)
+
+	// Write frames to the pipe in a goroutine
+	go func() {
+		defer writer.Close()
+		for frame := range frameChan {
+			if _, err := fmt.Fprintln(writer, frame.String()); err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing to pipe: %v\n", err)
+				return
+			}
+		}
+		// Check for any errors from the frame generation
+		if err := <-errChan; err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating frames: %v\n", err)
+			return
+		}
+	}()
+
+	// Wait for ffmpeg to complete
+	if err := cmd.Wait(); err != nil {
+		// Get the last few lines of stderr for more context
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			fmt.Fprintf(os.Stderr, "FFmpeg stderr output:\n%s\n", exitErr.Stderr)
+		}
 		return fmt.Errorf("failed to generate timelapse: %v", err)
 	}
 
