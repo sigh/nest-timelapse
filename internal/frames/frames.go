@@ -5,12 +5,16 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/sigh/nest-timelapse/internal/parsetime"
 )
 
 // FrameInfo represents information about a single frame in the timelapse
 type FrameInfo struct {
 	Path     string
 	Duration float64
+	Time     time.Time // Time when the frame was captured
 }
 
 // String returns the frame information formatted for ffmpeg concat demuxer
@@ -30,9 +34,31 @@ func (f FrameInfo) String() string {
 	return fmt.Sprintf("file 'file://%s'", escapedFile)
 }
 
-// GenerateFrames takes an input pattern and framerate, and sends frame information through a channel.
+// parseFrameTime extracts the timestamp from a frame filename
+// Expected format: nest_camera_frame_YYYYMMDD_HHMMSS.jpg
+func parseFrameTime(filename string) (time.Time, error) {
+	base := filepath.Base(filename)
+	parts := strings.Split(base, "_")
+	if len(parts) < 4 {
+		return time.Time{}, fmt.Errorf("invalid filename format: %s", filename)
+	}
+
+	// Get the date and time parts
+	dateStr := parts[3]
+	timeStr := strings.TrimSuffix(parts[4], filepath.Ext(parts[4]))
+
+	// Parse the timestamp
+	t, err := time.Parse("20060102_150405", dateStr+"_"+timeStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid timestamp in filename: %s", filename)
+	}
+
+	return t, nil
+}
+
+// GenerateFrames takes an input pattern, framerate, and time range, and sends frame information through a channel.
 // It returns an error channel that will receive any errors encountered during processing.
-func GenerateFrames(pattern string, framerate int) (<-chan FrameInfo, <-chan error) {
+func GenerateFrames(pattern string, framerate int, timeRange *parsetime.TimeRange) (<-chan FrameInfo, <-chan error) {
 	frameChan := make(chan FrameInfo)
 	errChan := make(chan error, 1)
 
@@ -51,26 +77,56 @@ func GenerateFrames(pattern string, framerate int) (<-chan FrameInfo, <-chan err
 			return
 		}
 
-		// Sort the matches to ensure consistent ordering
-		sort.Strings(matches)
+		// Parse timestamps and filter by time range
+		var frames []FrameInfo
+		for _, match := range matches {
+			t, err := parseFrameTime(match)
+			if err != nil {
+				errChan <- fmt.Errorf("error parsing frame time: %v", err)
+				return
+			}
+
+			// Skip if outside time range
+			if timeRange != nil {
+				// Check if we have a start time and the frame is before it
+				if !timeRange.Start.IsZero() && t.Before(timeRange.Start) {
+					continue
+				}
+				// Check if we have an end time and the frame is after it
+				if !timeRange.End.IsZero() && t.After(timeRange.End) {
+					continue
+				}
+			}
+
+			frames = append(frames, FrameInfo{
+				Path: match,
+				Time: t,
+			})
+		}
+
+		if len(frames) == 0 {
+			errChan <- fmt.Errorf("no frames found within specified time range")
+			return
+		}
+
+		// Sort frames by timestamp
+		sort.Slice(frames, func(i, j int) bool {
+			return frames[i].Time.Before(frames[j].Time)
+		})
 
 		// Calculate frame duration based on framerate
 		frameDuration := 1.0 / float64(framerate)
 
 		// Send all frames except the last one
-		for i := 0; i < len(matches)-1; i++ {
-			frameChan <- FrameInfo{
-				Path:     matches[i],
-				Duration: frameDuration,
-			}
+		for i := 0; i < len(frames)-1; i++ {
+			frames[i].Duration = frameDuration
+			frameChan <- frames[i]
 		}
 
 		// Send the last frame without duration
-		if len(matches) > 0 {
-			frameChan <- FrameInfo{
-				Path:     matches[len(matches)-1],
-				Duration: 0, // Last frame doesn't need duration
-			}
+		if len(frames) > 0 {
+			frames[len(frames)-1].Duration = 0 // Last frame doesn't need duration
+			frameChan <- frames[len(frames)-1]
 		}
 	}()
 

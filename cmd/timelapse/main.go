@@ -258,7 +258,7 @@ func generateTimelapse(config *Config) error {
 	}
 
 	// Get frames through the channel
-	frameChan, errChan := frames.GenerateFrames(config.InputPattern, config.Framerate)
+	frameChan, errChan := frames.GenerateFrames(config.InputPattern, config.Framerate, config.TimeRange)
 
 	// Write frames to the pipe in a goroutine
 	go func() {
