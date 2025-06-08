@@ -2,6 +2,7 @@ package frames
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -58,9 +59,9 @@ func parseFrameTime(filename string) (time.Time, error) {
 	return t, nil
 }
 
-// GenerateFrames generates frame information for the timelapse, filtering by time range if provided.
-// Returns a channel of frames and an error channel.
-func GenerateFrames(pattern string, speedup float64, timeRange *parsetime.TimeRange) (<-chan FrameInfo, <-chan error) {
+// GenerateFrames generates frame information for the timelapse by walking the input directory
+// and finding all image files. Returns a channel of frames and an error channel.
+func GenerateFrames(inputDir string, speedup float64, timeRange *parsetime.TimeRange) (<-chan FrameInfo, <-chan error) {
 	frameChan := make(chan FrameInfo)
 	errChan := make(chan error, 1)
 
@@ -68,37 +69,67 @@ func GenerateFrames(pattern string, speedup float64, timeRange *parsetime.TimeRa
 		defer close(frameChan)
 		defer close(errChan)
 
-		matches, err := filepath.Glob(pattern)
+		// Check if input directory exists
+		info, err := os.Stat(inputDir)
 		if err != nil {
-			errChan <- fmt.Errorf("invalid pattern: %v", err)
+			errChan <- fmt.Errorf("failed to access input directory: %w", err)
 			return
 		}
-		if len(matches) == 0 {
-			errChan <- fmt.Errorf("no files matching pattern '%s' found", pattern)
+		if !info.IsDir() {
+			errChan <- fmt.Errorf("input path is not a directory: %s", inputDir)
 			return
 		}
 
-		// Parse timestamps and filter by time range
+		// Walk the directory tree
 		var validFrames []FrameInfo
-		for _, match := range matches {
-			t, err := parseFrameTime(match)
+		err = filepath.Walk(inputDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				errChan <- fmt.Errorf("invalid timestamp in filename %s: %v", match, err)
-				return
+				return err
 			}
+
+			// Skip directories
+			if info.IsDir() {
+				return nil
+			}
+
+			// Check if file is a jpg
+			if !strings.HasSuffix(strings.ToLower(path), ".jpg") {
+				return nil
+			}
+
+			// Check if filename matches our expected pattern
+			if !strings.HasPrefix(filepath.Base(path), "nest_camera_frame_") {
+				return nil
+			}
+
+			// Parse timestamp from filename
+			t, err := parseFrameTime(path)
+			if err != nil {
+				// Skip files that don't match our timestamp format
+				return nil
+			}
+
+			// Filter by time range if provided
 			if timeRange != nil {
 				if t.Before(timeRange.Start) || t.After(timeRange.End) {
-					continue
+					return nil
 				}
 			}
+
 			validFrames = append(validFrames, FrameInfo{
-				Path: match,
+				Path: path,
 				Time: t,
 			})
+			return nil
+		})
+
+		if err != nil {
+			errChan <- fmt.Errorf("error walking directory: %w", err)
+			return
 		}
 
 		if len(validFrames) == 0 {
-			errChan <- fmt.Errorf("no frames found within specified time range")
+			errChan <- fmt.Errorf("no valid image files found in directory: %s", inputDir)
 			return
 		}
 

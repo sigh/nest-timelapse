@@ -24,7 +24,7 @@ type Config struct {
 	Speedup     float64
 	OutputFile  string
 	Overwrite   bool
-	InputPattern string
+	InputDir    string
 	CropX       *CropRange
 	CropY       *CropRange
 	TimeRange   *parsetime.TimeRange
@@ -106,9 +106,9 @@ func parseTimeRange(startTimeStr, endTimeStr, durationStr string) (*parsetime.Ti
 
 func parseArgs() (*Config, error) {
 	config := &Config{
-		Speedup:     3600, // Default to 3600x speedup (1 hour = 1 second)
-		OutputFile:  "timelapse.mp4",
-		InputPattern: "nest_camera_frame_*.jpg",
+		Speedup:    3600, // Default to 3600x speedup (1 hour = 1 second)
+		OutputFile: "timelapse.mp4",
+		InputDir:   ".", // Default to current directory
 	}
 
 	var cropXStr, cropYStr string
@@ -129,17 +129,24 @@ func parseArgs() (*Config, error) {
 
 	// Add minimal usage message for the positional argument
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [options] [input_pattern]\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "If input_pattern is not provided, defaults to \"nest_camera_frame_*.jpg\"\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s [options] [input_directory]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "If input_directory is not provided, defaults to current directory\n\n")
 		flag.PrintDefaults()
 	}
 
 	flag.Parse()
 
-	// Handle input pattern as positional argument
+	// Handle input directory as positional argument
 	if flag.NArg() > 0 {
-		config.InputPattern = flag.Arg(0)
+		config.InputDir = flag.Arg(0)
 	}
+
+	// Convert input directory to absolute path
+	absInputDir, err := filepath.Abs(config.InputDir)
+	if err != nil {
+		return nil, fmt.Errorf("invalid input directory: %w", err)
+	}
+	config.InputDir = absInputDir
 
 	// Parse speedup ratio
 	speedup, err := parsetime.ParseSpeedup(speedupStr)
@@ -183,13 +190,13 @@ func checkFFmpeg() error {
 	return nil
 }
 
-func checkInputFiles(pattern string) error {
-	matches, err := filepath.Glob(pattern)
+func checkInputDir(inputDir string) error {
+	info, err := os.Stat(inputDir)
 	if err != nil {
-		return fmt.Errorf("invalid pattern: %v", err)
+		return fmt.Errorf("failed to access input directory: %w", err)
 	}
-	if len(matches) == 0 {
-		return fmt.Errorf("no files matching pattern '%s' found", pattern)
+	if !info.IsDir() {
+		return fmt.Errorf("input path is not a directory: %s", inputDir)
 	}
 	return nil
 }
@@ -266,7 +273,7 @@ func generateTimelapse(config *Config) error {
 	}
 
 	// Get frames through the channel
-	frameChan, errChan := frames.GenerateFrames(config.InputPattern, config.Speedup, config.TimeRange)
+	frameChan, errChan := frames.GenerateFrames(config.InputDir, config.Speedup, config.TimeRange)
 
 	// Write frames to the pipe in a goroutine
 	go func() {
@@ -311,7 +318,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := checkInputFiles(config.InputPattern); err != nil {
+	if err := checkInputDir(config.InputDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

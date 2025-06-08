@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -19,9 +20,23 @@ const (
 
 // ExtractFirstFrame uses ffmpeg to extract the first frame from H264 data in memory
 func ExtractFirstFrame(h264Data *bytes.Buffer, outputDir string) error {
-	timestamp := time.Now().Format(timeFormat)
+	now := time.Now()
+
+	// Create year/month/day directory structure
+	dateDir := filepath.Join(outputDir,
+		fmt.Sprintf("%d", now.Year()),
+		fmt.Sprintf("%02d", now.Month()),
+		fmt.Sprintf("%02d", now.Day()),
+	)
+
+	// Create the directory structure if it doesn't exist
+	if err := os.MkdirAll(dateDir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory structure: %w", err)
+	}
+
+	timestamp := now.Format(timeFormat)
 	filename := fmt.Sprintf("%s%s.%s", imageFilePrefix, timestamp, imageFileExtension)
-	imagePath := filepath.Join(outputDir, filename)
+	imagePath := filepath.Join(dateDir, filename)
 
 	// Prepare ffmpeg command to read from stdin
 	cmd := exec.CommandContext(context.Background(), "ffmpeg",
